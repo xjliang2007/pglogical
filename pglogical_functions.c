@@ -81,6 +81,8 @@
 #include "pglogical_worker.h"
 
 #include "pglogical.h"
+#include "string.h"
+#include "stdio.h"
 
 /* Node management. */
 PG_FUNCTION_INFO_V1(pglogical_create_node);
@@ -1563,6 +1565,7 @@ pglogical_replication_set_add_sequence(PG_FUNCTION_ARGS)
 static Datum
 pglogical_replication_set_add_all_relations(Name repset_name,
 											ArrayType *nsp_names,
+											ArrayType *exclude_names,
 											bool synchronize, char relkind)
 {
 	PGLogicalRepSet    *repset;
@@ -1616,8 +1619,28 @@ pglogical_replication_set_add_all_relations(Name repset_name,
 				reltup->relpersistence != RELPERSISTENCE_PERMANENT ||
 				IsSystemClass(reloid, reltup))
 				continue;
+			/*
+			 * exclude specific tables
+			 */
+			List *exclude_list = textarray_to_list(exclude_names);
+			ListCell		   *lc_table;
+            bool needSkip = false;
+            foreach (lc_table, exclude_list)
+            {
+                char	   *exclude_table_name = lfirst(lc_table);
+                char *exclude_schema = strtok(exclude_table_name,".");
+                char *exclude_name = strtok(NULL,".");
+                char *rel_name = get_rel_name(reloid);
+//                elog(INFO,"exclude_schema=%s, nspname=%s, exclude_name=%s, rel_name=%s",exclude_schema,nspname,exclude_name,rel_name);
+                if(strcmp(exclude_schema,nspname) == 0 && strcmp(exclude_name,rel_name) == 0)
+                {
+                    elog(INFO,"attention please! match the exclude name %s.%s , skip to add it to replicate_set_table or replicate_set_sequence.",exclude_schema,exclude_name);
+                    needSkip = true;
+                    break;
+                }
+            }
 
-			if (!list_member_oid(existing_relations, reloid))
+			if (!list_member_oid(existing_relations, reloid) && !needSkip)
 			{
 				if (relkind == RELKIND_RELATION)
 					replication_set_add_table(repset->id, reloid, NIL, NULL);
@@ -1679,8 +1702,11 @@ pglogical_replication_set_add_all_tables(PG_FUNCTION_ARGS)
 	Name		repset_name = PG_GETARG_NAME(0);
 	ArrayType  *nsp_names = PG_GETARG_ARRAYTYPE_P(1);
 	bool		synchronize = PG_GETARG_BOOL(2);
+	ArrayType  *exclude_tables = PG_GETARG_ARRAYTYPE_P(3);
 
-	return pglogical_replication_set_add_all_relations(repset_name, nsp_names,
+	return pglogical_replication_set_add_all_relations(repset_name,
+	                                                   nsp_names,
+	                                                   exclude_tables,
 													   synchronize,
 													   RELKIND_RELATION);
 }
@@ -1694,8 +1720,10 @@ pglogical_replication_set_add_all_sequences(PG_FUNCTION_ARGS)
 	Name		repset_name = PG_GETARG_NAME(0);
 	ArrayType  *nsp_names = PG_GETARG_ARRAYTYPE_P(1);
 	bool		synchronize = PG_GETARG_BOOL(2);
-
-	return pglogical_replication_set_add_all_relations(repset_name, nsp_names,
+    ArrayType  *exclude_sequences = PG_GETARG_ARRAYTYPE_P(3);
+	return pglogical_replication_set_add_all_relations(repset_name,
+	                                                   nsp_names,
+	                                                   exclude_sequences,
 													   synchronize,
 													   RELKIND_SEQUENCE);
 }
