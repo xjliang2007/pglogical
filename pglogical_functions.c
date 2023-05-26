@@ -117,9 +117,11 @@ PG_FUNCTION_INFO_V1(pglogical_alter_replication_set);
 PG_FUNCTION_INFO_V1(pglogical_drop_replication_set);
 PG_FUNCTION_INFO_V1(pglogical_replication_set_add_table);
 PG_FUNCTION_INFO_V1(pglogical_replication_set_add_all_tables);
+PG_FUNCTION_INFO_V1(pglogical_replication_set_add_all_tables_exclude);
 PG_FUNCTION_INFO_V1(pglogical_replication_set_remove_table);
 PG_FUNCTION_INFO_V1(pglogical_replication_set_add_sequence);
 PG_FUNCTION_INFO_V1(pglogical_replication_set_add_all_sequences);
+PG_FUNCTION_INFO_V1(pglogical_replication_set_add_all_sequences_exclude);
 PG_FUNCTION_INFO_V1(pglogical_replication_set_remove_sequence);
 
 /* Other manipulation function */
@@ -1565,8 +1567,125 @@ pglogical_replication_set_add_sequence(PG_FUNCTION_ARGS)
 static Datum
 pglogical_replication_set_add_all_relations(Name repset_name,
 											ArrayType *nsp_names,
+											bool synchronize,
+											char relkind)
+{
+	PGLogicalRepSet    *repset;
+	Relation			rel;
+	PGLogicalLocalNode *node;
+	ListCell		   *lc;
+	List			   *existing_relations = NIL;
+
+	node = check_local_node(true);
+
+	/* Find the replication set. */
+	repset = get_replication_set_by_name(node->node->id,
+										 NameStr(*repset_name), false);
+
+	existing_relations = replication_set_get_tables(repset->id);
+	existing_relations = list_concat_unique_oid(existing_relations,
+												replication_set_get_seqs(repset->id));
+
+	rel = table_open(RelationRelationId, RowExclusiveLock);
+
+	foreach (lc, textarray_to_list(nsp_names))
+	{
+		char	   *nspname = lfirst(lc);
+		Oid			nspoid = LookupExplicitNamespace(nspname, false);
+		ScanKeyData skey[1];
+		SysScanDesc sysscan;
+		HeapTuple	tuple;
+
+		ScanKeyInit(&skey[0],
+					Anum_pg_class_relnamespace,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(nspoid));
+
+		sysscan = systable_beginscan(rel, ClassNameNspIndexId, true,
+									 NULL, 1, skey);
+
+		while (HeapTupleIsValid(tuple = systable_getnext(sysscan)))
+		{
+			Form_pg_class	reltup = (Form_pg_class) GETSTRUCT(tuple);
+#if PG_VERSION_NUM < 120000
+			Oid				reloid = HeapTupleGetOid(tuple);
+#else
+			Oid				reloid = reltup->oid;
+#endif
+
+			/*
+			 * Only add logged relations which are not system relations
+			 * (catalog, toast).
+			 */
+			if (reltup->relkind != relkind ||
+				reltup->relpersistence != RELPERSISTENCE_PERMANENT ||
+				IsSystemClass(reloid, reltup))
+				continue;
+
+
+			if (!list_member_oid(existing_relations, reloid))
+			{
+				if (relkind == RELKIND_RELATION)
+					replication_set_add_table(repset->id, reloid, NIL, NULL);
+				else
+					replication_set_add_seq(repset->id, reloid);
+
+				if (synchronize)
+				{
+					char			   *relname;
+					StringInfoData		json;
+					char				cmdtype;
+
+					relname = get_rel_name(reloid);
+
+					/* It's easier to construct json manually than via Jsonb API... */
+					initStringInfo(&json);
+					appendStringInfo(&json, "{\"schema_name\": ");
+					escape_json(&json, nspname);
+					switch (relkind)
+					{
+						case RELKIND_RELATION:
+							appendStringInfo(&json, ",\"table_name\": ");
+							escape_json(&json, relname);
+							cmdtype = QUEUE_COMMAND_TYPE_TABLESYNC;
+							break;
+						case RELKIND_SEQUENCE:
+							appendStringInfo(&json, ",\"sequence_name\": ");
+							escape_json(&json, relname);
+							appendStringInfo(&json, ",\"last_value\": \""INT64_FORMAT"\"",
+											 sequence_get_last_value(reloid));
+							cmdtype = QUEUE_COMMAND_TYPE_SEQUENCE;
+							break;
+						default:
+							elog(ERROR, "unsupported relkind '%c'", relkind);
+					}
+					appendStringInfo(&json, "}");
+
+					/* Queue the truncate for replication. */
+					queue_message(list_make1(repset->name), GetUserId(), cmdtype,
+								  json.data);
+				}
+			}
+		}
+
+		systable_endscan(sysscan);
+	}
+
+	table_close(rel, RowExclusiveLock);
+
+	PG_RETURN_BOOL(true);
+}
+
+/*
+ * Common function for adding replication set / relation mapping based on
+ * schemas.
+ */
+static Datum
+pglogical_replication_set_add_all_relations_exclude(Name repset_name,
+											ArrayType *nsp_names,
 											ArrayType *exclude_names,
-											bool synchronize, char relkind)
+											bool synchronize,
+											char relkind)
 {
 	PGLogicalRepSet    *repset;
 	Relation			rel;
@@ -1620,25 +1739,28 @@ pglogical_replication_set_add_all_relations(Name repset_name,
 				IsSystemClass(reloid, reltup))
 				continue;
 			/*
-			 * exclude specific tables
+			 * exclude specific tables/sequences
 			 */
+			bool needSkip = false;
 			List *exclude_list = textarray_to_list(exclude_names);
-			ListCell		   *lc_table;
-            bool needSkip = false;
-            foreach (lc_table, exclude_list)
-            {
-                char	   *exclude_table_name = lfirst(lc_table);
-                char *exclude_schema = strtok(exclude_table_name,".");
-                char *exclude_name = strtok(NULL,".");
-                char *rel_name = get_rel_name(reloid);
-//                elog(INFO,"exclude_schema=%s, nspname=%s, exclude_name=%s, rel_name=%s",exclude_schema,nspname,exclude_name,rel_name);
-                if(strcmp(exclude_schema,nspname) == 0 && strcmp(exclude_name,rel_name) == 0)
+			if(exclude_list != NIL)
+			{
+                ListCell		   *lc_table;
+                foreach (lc_table, exclude_list)
                 {
-                    elog(INFO,"attention please! match the exclude name %s.%s , skip to add it to replicate_set_table or replicate_set_sequence.",exclude_schema,exclude_name);
-                    needSkip = true;
-                    break;
+                    char	   *exclude_table_name = lfirst(lc_table);
+                    char *exclude_schema = strtok(exclude_table_name,".");
+                    char *exclude_name = strtok(NULL,".");
+                    char *rel_name = get_rel_name(reloid);
+                    if(strcmp(exclude_schema,nspname) == 0 && strcmp(exclude_name,rel_name) == 0)
+                    {
+                        elog(INFO,"attention please! match the exclude name %s.%s , skip to add it to replicate_set_table or replicate_set_sequence.",exclude_schema,exclude_name);
+                        needSkip = true;
+                        break;
+                    }
                 }
-            }
+			}
+
 
 			if (!list_member_oid(existing_relations, reloid) && !needSkip)
 			{
@@ -1693,6 +1815,7 @@ pglogical_replication_set_add_all_relations(Name repset_name,
 	PG_RETURN_BOOL(true);
 }
 
+
 /*
  * Add replication set / table mapping based on schemas.
  */
@@ -1702,13 +1825,25 @@ pglogical_replication_set_add_all_tables(PG_FUNCTION_ARGS)
 	Name		repset_name = PG_GETARG_NAME(0);
 	ArrayType  *nsp_names = PG_GETARG_ARRAYTYPE_P(1);
 	bool		synchronize = PG_GETARG_BOOL(2);
-	ArrayType  *exclude_tables = PG_GETARG_ARRAYTYPE_P(3);
+    return pglogical_replication_set_add_all_relations(repset_name,nsp_names,synchronize,RELKIND_RELATION);
+}
 
-	return pglogical_replication_set_add_all_relations(repset_name,
-	                                                   nsp_names,
-	                                                   exclude_tables,
-													   synchronize,
-													   RELKIND_RELATION);
+
+/*
+ * Add replication set / table mapping based on schemas. support exclude some tables
+ */
+Datum
+pglogical_replication_set_add_all_tables_exclude(PG_FUNCTION_ARGS)
+{
+	Name		repset_name = PG_GETARG_NAME(0);
+	ArrayType  *nsp_names = PG_GETARG_ARRAYTYPE_P(1);
+	ArrayType  *exclude_tables = PG_GETARG_ARRAYTYPE_P(2);
+	bool		synchronize = PG_GETARG_BOOL(3);
+	return pglogical_replication_set_add_all_relations_exclude(repset_name,
+        	                                                   nsp_names,
+        	                                                   exclude_tables,
+        													   synchronize,
+        													   RELKIND_RELATION);
 }
 
 /*
@@ -1720,12 +1855,25 @@ pglogical_replication_set_add_all_sequences(PG_FUNCTION_ARGS)
 	Name		repset_name = PG_GETARG_NAME(0);
 	ArrayType  *nsp_names = PG_GETARG_ARRAYTYPE_P(1);
 	bool		synchronize = PG_GETARG_BOOL(2);
-    ArrayType  *exclude_sequences = PG_GETARG_ARRAYTYPE_P(3);
-	return pglogical_replication_set_add_all_relations(repset_name,
-	                                                   nsp_names,
-	                                                   exclude_sequences,
-													   synchronize,
-													   RELKIND_SEQUENCE);
+    return pglogical_replication_set_add_all_relations(repset_name,nsp_names,synchronize,RELKIND_SEQUENCE);
+}
+
+
+/*
+ * Add replication set / sequence mapping based on schemas, support exclude some sequences
+ */
+Datum
+pglogical_replication_set_add_all_sequences_exclude(PG_FUNCTION_ARGS)
+{
+	Name		repset_name = PG_GETARG_NAME(0);
+	ArrayType  *nsp_names = PG_GETARG_ARRAYTYPE_P(1);
+	ArrayType  *exclude_sequences = PG_GETARG_ARRAYTYPE_P(2);
+	bool		synchronize = PG_GETARG_BOOL(3);
+    return pglogical_replication_set_add_all_relations_exclude(repset_name,
+        	                                                   nsp_names,
+        	                                                   exclude_sequences,
+        													   synchronize,
+        													   RELKIND_SEQUENCE);
 }
 
 /*
