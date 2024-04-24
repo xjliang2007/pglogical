@@ -4,6 +4,13 @@ The pglogical 2 extension provides logical streaming replication for PostgreSQL,
 using a publish/subscribe model. It is based on technology developed as part
 of the BDR project (http://2ndquadrant.com/BDR).
 
+While pglogical is actively maintained, EnterpriseDB (which acquired
+2ndQuadrant in 2020) focuses new feature development on a descendant
+of pglogical: [Postgres
+Distributed](https://www.enterprisedb.com/docs/pgd/latest/overview/). Postgres
+Distributed introduced new features such as DDL replication, write
+leaders, parallel apply, and more.
+
 We use the following terms to describe data streams between nodes, deliberately
 reused from the earlier Slony technology:
 * Nodes - PostgreSQL database instances
@@ -831,6 +838,10 @@ subscriber database(s) remain compatible is the responsibility of the user.
 
 pglogical provides the `pglogical.replicate_ddl_command` function to allow DDL
 to be run on the provider and subscriber at a consistent point.
+
+If you need DDL replication, you can look at EnterpriseDB's [Postgres
+Distributed](https://www.enterprisedb.com/docs/pgd/latest/overview/)
+product which is built on pglogical.
 
 ### No replication queue flush
 
