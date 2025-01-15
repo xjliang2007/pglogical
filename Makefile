@@ -34,7 +34,13 @@ DATA = pglogical--1.0.0.sql pglogical--1.0.0--1.0.1.sql \
 	   pglogical--2.4.0--2.4.1.sql \
 	   pglogical--2.4.1.sql \
 	   pglogical--2.4.1--2.4.2.sql \
-	   pglogical--2.4.2.sql
+	   pglogical--2.4.2.sql \
+	   pglogical--2.4.2--2.4.3.sql \
+	   pglogical--2.4.3.sql \
+	   pglogical--2.4.3--2.4.4.sql \
+	   pglogical--2.4.4.sql \
+	   pglogical--2.4.4--2.4.5.sql \
+	   pglogical--2.4.5.sql
 
 OBJS = pglogical_apply.o pglogical_conflict.o pglogical_manager.o \
 	   pglogical.o pglogical_node.o pglogical_relcache.o \
@@ -50,7 +56,7 @@ SCRIPTS_built = pglogical_create_subscriber
 
 REGRESS = preseed infofuncs init_fail init preseed_check basic extended conflict_secondary_unique \
 		  toasted replication_set add_table matview bidirectional primary_key \
-		  interfaces foreign_key functions copy triggers parallel row_filter \
+		  interfaces foreign_key functions copy sequence triggers parallel row_filter \
 		  row_filter_sampling att_list column_filter apply_delay multiple_upstreams \
 		  node_origin_cascade drop
 
@@ -60,6 +66,9 @@ EXTRA_CLEAN += compat94/pglogical_compat.o compat95/pglogical_compat.o \
 			   compat12/pglogical_compat.o compat12/pglogical_compat.bc \
 			   compat13/pglogical_compat.o compat13/pglogical_compat.bc \
 			   compat14/pglogical_compat.o compat14/pglogical_compat.bc \
+			   compat15/pglogical_compat.o compat15/pglogical_compat.bc \
+			   compat16/pglogical_compat.o compat16/pglogical_compat.bc \
+			   compat17/pglogical_compat.o compat17/pglogical_compat.bc \
 			   pglogical_create_subscriber.o
 
 # The # in #define is taken as a comment, per https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=142043
@@ -134,7 +143,7 @@ else
 # But this is still not ideal.
 regresscheck:
 	$(MKDIR_P) regression_output
-	$(pg_regress_check) \
+	$(pg_regress_installcheck) \
 	    --temp-config ./regress-postgresql.conf \
 	    --temp-instance=./tmp_check \
 	    --outputdir=./regression_output \

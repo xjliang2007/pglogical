@@ -4,6 +4,13 @@ The pglogical 2 extension provides logical streaming replication for PostgreSQL,
 using a publish/subscribe model. It is based on technology developed as part
 of the BDR project (http://2ndquadrant.com/BDR).
 
+While pglogical is actively maintained, EnterpriseDB (which acquired
+2ndQuadrant in 2020) focuses new feature development on a descendant
+of pglogical: [Postgres
+Distributed](https://www.enterprisedb.com/docs/pgd/latest/overview/). Postgres
+Distributed introduced new features such as DDL replication, write
+leaders, parallel apply, and more.
+
 We use the following terms to describe data streams between nodes, deliberately
 reused from the earlier Slony technology:
 * Nodes - PostgreSQL database instances
@@ -50,7 +57,7 @@ be the same or weaker (more permissive) on the subscriber than the provider.
 Tables must have the same `PRIMARY KEY`s. It is not recommended to add additional
 `UNIQUE` constraints other than the `PRIMARY KEY` (see below).
 
-Some additional requirements are covered in "Limitations and Restrictions", below.
+Some additional requirements are covered in [Limitations and Restrictions](#limitations-and-restrictions).
 
 ## Installation
 
@@ -73,7 +80,6 @@ If you don’t have PostgreSQL already:
 
  - Install the appropriate PGDG repo rpm from http://yum.postgresql.org/repopackages.php
  - Install PostgreSQL
-    - PostgreSQL 9.4: `yum install postgresql94-server postgresql94-contrib`
     - PostgreSQL 9.5: `yum install postgresql95-server postgresql95-contrib`
     - PostgreSQL 9.6: `yum install postgresql96-server postgresql96-contrib`
     - PostgreSQL 10: `yum install postgresql10-server postgresql10-contrib`
@@ -82,40 +88,23 @@ If you don’t have PostgreSQL already:
     - PostgreSQL 13: `yum install postgresql13-server postgresql13-contrib`
     - PostgreSQL 14: `yum install postgresql14-server postgresql14-contrib`
     - PostgreSQL 15: `yum install postgresql15-server postgresql15-contrib`
-
-Then install the “2ndQuadrant’s General Public” repository for your PostgreSQL
-version, by running the following instructions as root on the destination Linux server:
-
- - PostgreSQL 9.4: `curl https://techsupport.enterprisedb.com/api/repository/dl/default/release/9.4/rpm | bash`
- - PostgreSQL 9.5: `curl https://techsupport.enterprisedb.com/api/repository/dl/default/release/9.5/rpm | bash`
- - PostgreSQL 9.6: `curl https://techsupport.enterprisedb.com/api/repository/dl/default/release/9.6/rpm | bash`
- - PostgreSQL 10: `curl https://techsupport.enterprisedb.com/api/repository/dl/default/release/10/rpm | bash`
- - PostgreSQL 11: `curl https://techsupport.enterprisedb.com/api/repository/dl/default/release/11/rpm | bash`
- - PostgreSQL 12: `curl https://techsupport.enterprisedb.com/api/repository/dl/default/release/12/rpm | bash`
- - PostgreSQL 13: `curl https://techsupport.enterprisedb.com/api/repository/dl/default/release/13/rpm | bash`
- - PostgreSQL 14: `curl https://techsupport.enterprisedb.com/api/repository/dl/default/release/14/rpm | bash`
- - PostgreSQL 15: `curl https://techsupport.enterprisedb.com/api/repository/dl/default/release/15/rpm | bash`
+    - PostgreSQL 16: `yum install postgresql16-server postgresql16-contrib`
+    - PostgreSQL 17: `yum install postgresql17-server postgresql17-contrib`
 
 ##### Installation
 
-Once the repository is installed, you can proceed to pglogical for your PostgreSQL version:
+You can proceed to install pglogical for your PostgreSQL version:
 
- - PostgreSQL 9.4: `yum install postgresql94-pglogical`
- - PostgreSQL 9.5: `yum install postgresql95-pglogical`
- - PostgreSQL 9.6: `yum install postgresql96-pglogical`
- - PostgreSQL 10: `yum install postgresql10-pglogical`
- - PostgreSQL 11: `yum install postgresql11-pglogical`
- - PostgreSQL 12: `yum install postgresql12-pglogical`
- - PostgreSQL 13: `yum install postgresql13-pglogical`
- - PostgreSQL 14: `yum install postgresql14-pglogical`
- - PostgreSQL 15: `yum install postgresql15-pglogical`
-
-You may be prompted to accept the repository GPG key for package signing:
-
-    Retrieving key from file:///etc/pki/rpm-gpg/RPM-GPG-KEY-2NDQ-DL-DEFAULT Importing GPG key 0xD6BAF0C3: Userid : "Public repository signing key 2ndQuadrant <ci@2ndquadrant.com>" Fingerprint: 8565 305c ea7d 0b66 4933 d250 9904 cd4b d6ba f0c3 From : /etc/pki/rpm-gpg/RPM-GPG-KEY-2NDQ-DL-DEFAULT Is this ok [y/N]:
-
-If so, accept the key (if it matches the above) by pressing ‘y’ then enter.
-(It’s signed by the 2ndQuadrant master packaging key, if you want to verify that.)
+ - PostgreSQL 9.5: `yum install pglogical_95`
+ - PostgreSQL 9.6: `yum install pglogical_96`
+ - PostgreSQL 10: `yum install pglogical_10`
+ - PostgreSQL 11: `yum install pglogical_11`
+ - PostgreSQL 12: `yum install pglogical_12`
+ - PostgreSQL 13: `yum install pglogical_13`
+ - PostgreSQL 14: `yum install pglogical_14`
+ - PostgreSQL 15: `yum install pglogical_15`
+ - PostgreSQL 16: `yum install pglogical_16`
+ - PostgreSQL 17: `yum install pglogical_17`
 
 #### Installing pglogical with APT
 
@@ -124,16 +113,23 @@ Debian (e.g. Ubuntu).
 
 ##### Pre-requisites
 
-You can install the “2ndQuadrant’s General Public” repository by running the
-following instructions as root on the destination Linux server: `curl https://techsupport.enterprisedb.com/api/repository/dl/default/release/deb | bash`
-
- - Add the http://apt.postgresql.org/ repository. See the site for instructions.
+ - Add the https://apt.postgresql.org/ repository. See the site for instructions.
+ - Install PostgreSQL
+    - PostgreSQL 9.5: `sudo apt-get install postgresql-9.5`
+    - PostgreSQL 9.6: `sudo apt-get install postgresql-9.6`
+    - PostgreSQL 10: `sudo apt-get install postgresql-10`
+    - PostgreSQL 11: `sudo apt-get install postgresql-11`
+    - PostgreSQL 12: `sudo apt-get install postgresql-12`
+    - PostgreSQL 13: `sudo apt-get install postgresql-13`
+    - PostgreSQL 14: `sudo apt-get install postgresql-14`
+    - PostgreSQL 15: `sudo apt-get install postgresql-15`
+    - PostgreSQL 16: `sudo apt-get install postgresql-16`
+    - PostgreSQL 17: `sudo apt-get install postgresql-17`
 
 ##### Installation
 
 Once pre-requisites are complete, installing pglogical is simply a matter of executing the following for your version of PostgreSQL:
 
- - PostgreSQL 9.4: `sudo apt-get install postgresql-9.4-pglogical`
  - PostgreSQL 9.5: `sudo apt-get install postgresql-9.5-pglogical`
  - PostgreSQL 9.6: `sudo apt-get install postgresql-9.6-pglogical`
  - PostgreSQL 10: `sudo apt-get install postgresql-10-pglogical`
@@ -142,6 +138,8 @@ Once pre-requisites are complete, installing pglogical is simply a matter of exe
  - PostgreSQL 13: `sudo apt-get install postgresql-13-pglogical`
  - PostgreSQL 14: `sudo apt-get install postgresql-14-pglogical`
  - PostgreSQL 15: `sudo apt-get install postgresql-15-pglogical`
+ - PostgreSQL 16: `sudo apt-get install postgresql-16-pglogical`
+ - PostgreSQL 17: `sudo apt-get install postgresql-17-pglogical`
 
 ### From source code
 
@@ -156,12 +154,12 @@ you don't have `pg_config`.
 Then run `make` to compile, and `make install` to
 install. You might need to use `sudo` for the install step.
 
-e.g. for a typical Fedora or RHEL 7 install, assuming you're using the
+e.g. for a typical Fedora or RHEL 9 install, assuming you're using the
 [yum.postgresql.org](http://yum.postgresql.org) packages for PostgreSQL:
 
-    sudo dnf install postgresql95-devel
-    PATH=/usr/pgsql-9.5/bin:$PATH make clean all
-    sudo PATH=/usr/pgsql-9.5/bin:$PATH make install
+    sudo dnf install postgresql17-devel
+    PATH=/usr/pgsql-17/bin:$PATH make clean all
+    sudo PATH=/usr/pgsql-17/bin:$PATH make install
 
 ## Usage
 
@@ -832,6 +830,10 @@ subscriber database(s) remain compatible is the responsibility of the user.
 pglogical provides the `pglogical.replicate_ddl_command` function to allow DDL
 to be run on the provider and subscriber at a consistent point.
 
+If you need DDL replication, you can look at EnterpriseDB's [Postgres
+Distributed](https://www.enterprisedb.com/docs/pgd/latest/overview/)
+product which is built on pglogical.
+
 ### No replication queue flush
 
 There's no support for freezing transactions on the master and waiting until
@@ -955,6 +957,40 @@ pglogical license is The PostgreSQL License
 pglogical copyright is donated to PostgreSQL Global Development Group
 
 ## Appendix B: Release Notes
+
+### pglogical 2.4.5
+
+Version 2.4.5 is a maintenance release of pglogical 2.
+
+#### Changes
+
+* Add support for PostgreSQL 17.
+
+* Maintain indexes when updating pglogical.sequence_state.
+
+* Don't use invalid indexes for conflict resolution.
+
+### pglogical 2.4.4
+
+Version 2.4.4 is a maintenance release of pglogical 2.
+
+#### Changes
+
+* Add support for PostgreSQL 16.
+
+### pglogical 2.4.3
+
+Version 2.4.3 is a maintenance release of pglogical 2.
+
+#### Changes
+
+* Apply data filtering on the correct tuple during initial synchronization.
+
+* Restore the correct memory context while decoding a change.
+
+* Drop database never completes in PostgreSQL 15.
+
+* Don't replicate TRUNCATE as global message.
 
 ### pglogical 2.4.2
 

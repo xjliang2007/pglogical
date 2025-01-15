@@ -39,6 +39,9 @@
 #endif
 
 #include "parser/parse_coerce.h"
+#if PG_VERSION_NUM >= 160000
+#include "parser/parse_relation.h"
+#endif
 
 #include "tcop/utility.h"
 
@@ -70,6 +73,9 @@ create_estate_for_relation(Relation rel, bool forwrite)
 {
 	EState	   *estate;
 	RangeTblEntry *rte;
+#if PG_VERSION_NUM >= 160000
+	List	   *perminfos = NIL;
+#endif
 
 
 	/* Dummy range table entry needed by executor. */
@@ -80,7 +86,10 @@ create_estate_for_relation(Relation rel, bool forwrite)
 
 	/* Initialize executor state. */
 	estate = CreateExecutorState();
-#if PG_VERSION_NUM >= 120000
+#if PG_VERSION_NUM >= 160000
+	addRTEPermissionInfo(&perminfos, rte);
+	ExecInitRangeTable(estate, list_make1(rte), perminfos);
+#elif PG_VERSION_NUM >= 120000
 	ExecInitRangeTable(estate, list_make1(rte));
 #elif PG_VERSION_NUM >= 110000 && SECONDQ_VERSION_NUM >= 103
 	/* 2ndQPostgres 11 r1.3 changes executor API */
@@ -173,6 +182,8 @@ pglogical_finish_truncate(void)
 		nspname = get_namespace_name(get_rel_namespace(reloid));
 		relname = get_rel_name(reloid);
 
+		elog(DEBUG3, "truncating the table %s.%s", nspname, relname);
+
 		/* It's easier to construct json manually than via Jsonb API... */
 		initStringInfo(&json);
 		appendStringInfo(&json, "{\"schema_name\": ");
@@ -192,6 +203,8 @@ pglogical_finish_truncate(void)
 			{
 				PGLogicalRepSet	    *repset = (PGLogicalRepSet *) lfirst(rlc);
 				repset_names = lappend(repset_names, pstrdup(repset->name));
+				elog(DEBUG1, "truncating the table %s.%s for %s repset",
+					 nspname, relname, repset->name);
 			}
 
 			/* Queue the truncate for replication. */

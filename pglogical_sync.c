@@ -86,7 +86,7 @@
 #define Anum_sync_status		5
 #define Anum_sync_statuslsn		6
 
-void pglogical_sync_main(Datum main_arg);
+void PGDLLEXPORT pglogical_sync_main(Datum main_arg);
 
 static PGLogicalSyncWorker	   *MySyncWorker = NULL;
 
@@ -572,7 +572,7 @@ copy_table_data(PGconn *origin_conn, PGconn *target_conn,
 	{
 		StringInfoData	relname;
 		StringInfoData	repsetarr;
-		ListCell   *lc;
+		ListCell   *lc1;
 
 		initStringInfo(&relname);
 		appendStringInfo(&relname, "%s.%s",
@@ -583,9 +583,9 @@ copy_table_data(PGconn *origin_conn, PGconn *target_conn,
 
 		initStringInfo(&repsetarr);
 		first = true;
-		foreach (lc, replication_sets)
+		foreach (lc1, replication_sets)
 		{
-			char	   *repset_name = lfirst(lc);
+			char	   *repset_name = lfirst(lc1);
 
 			if (first)
 				first = false;
@@ -883,7 +883,7 @@ pglogical_sync_subscription(PGLogicalSubscription *sub)
 		PGconn	   *origin_conn_repl;
 		RepOriginId	originid;
 		char	   *snapshot;
-		bool		use_failover_slot;
+		bool		use_failover_slot = false;
 
 		elog(INFO, "initializing subscriber %s", sub->name);
 
@@ -891,11 +891,13 @@ pglogical_sync_subscription(PGLogicalSubscription *sub)
 										sub->name, "snap");
 
 		/* 2QPG9.6 and 2QPG11 support failover slots */
+#if defined(SECONDQ_VERSION_NUM) && PG_VERSION_NUM < 120000
 		use_failover_slot =
 			pglogical_remote_function_exists(origin_conn, "pg_catalog",
 											 "pg_create_logical_replication_slot",
 											 -1,
 											 "failover");
+#endif
 		origin_conn_repl = pglogical_connect_replica(sub->origin_if->dsn,
 													 sub->name, "snap");
 
@@ -1262,7 +1264,7 @@ pglogical_sync_main(Datum main_arg)
 	originid = replorigin_by_name(MySubscription->slot_name, false);
 	elog(DEBUG2, "setting origin %s (oid %u) for subscription sync",
 		MySubscription->slot_name, originid);
-	replorigin_session_setup(originid);
+	PGLreplorigin_session_setup(originid);
 	replorigin_session_origin = originid;
 	Assert(status_lsn == replorigin_session_get_progress(false));
 
